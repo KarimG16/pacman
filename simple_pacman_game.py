@@ -254,8 +254,7 @@ def main():
                     if event.key == pygame.K_LEFT or event.key == pygame.K_a:
                         print("Left key pressed")
                         game.pacman.next_direction = (-1, 0)
-                    elif event.key == pygame.K_RIG
-                    HT or event.key == pygame.K_d:
+                    elif event.key == pygame.K_RIGHT or event.key == pygame.K_d:
                         print("Right key pressed")
                         game.pacman.next_direction = (1, 0)
                     elif event.key == pygame.K_UP or event.key == pygame.K_w:
