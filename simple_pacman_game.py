@@ -38,8 +38,18 @@ class Pacman:
         self.next_direction = (0, 0)
         self.score = 0
         self.lives = 3
+        self.power_mode = False
+        self.power_timer = 0
+        self.power_duration = 5.0  # Power mode lasts 5 seconds
         
     def update(self, dt, walls):
+        # Update power mode timer
+        if self.power_mode:
+            self.power_timer += dt
+            if self.power_timer >= self.power_duration:
+                self.power_mode = False
+                self.power_timer = 0
+        
         # Always allow direction changes for now
         if self.next_direction != (0, 0):
             self.direction = self.next_direction
@@ -84,8 +94,9 @@ class Pacman:
         return (int(self.x // TILE_SIZE), int(self.y // TILE_SIZE))
     
     def draw(self, screen):
-        # Draw Pacman body
-        pygame.draw.circle(screen, YELLOW, (int(self.x), int(self.y)), self.radius)
+        # Draw Pacman body - change color when in power mode
+        color = YELLOW if not self.power_mode else (255, 255, 100)  # Slightly different yellow when powered
+        pygame.draw.circle(screen, color, (int(self.x), int(self.y)), self.radius)
         
         # Draw mouth
         if self.direction != (0, 0):
@@ -120,8 +131,18 @@ class Ghost:
         self.direction_timer = 0
         self.direction_change_interval = 1.0  # Change direction every second
         self.last_direction_change = 0
+        self.vulnerable = False
+        self.eaten = False
+        self.original_color = color
         
-    def update(self, dt, walls, pacman_pos):
+    def update(self, dt, walls, pacman_pos, pacman_power_mode):
+        # Update vulnerability based on Pacman's power mode
+        self.vulnerable = pacman_power_mode
+        
+        # If eaten, don't move
+        if self.eaten:
+            return
+        
         # Update direction change timer
         self.direction_timer += dt
         
@@ -129,7 +150,7 @@ class Ghost:
         if (self.direction_timer - self.last_direction_change > self.direction_change_interval or 
             self.check_wall_collision(self.x + self.direction[0] * self.speed * dt, 
                                     self.y + self.direction[1] * self.speed * dt, walls)):
-            self.choose_new_direction(walls, pacman_pos)
+            self.choose_new_direction(walls, pacman_pos, pacman_power_mode)
             self.last_direction_change = self.direction_timer
         
         # Move ghost
@@ -145,12 +166,12 @@ class Ghost:
             self.y = new_y
         else:
             # Stop movement if hitting a wall and choose new direction
-            self.choose_new_direction(walls, pacman_pos)
+            self.choose_new_direction(walls, pacman_pos, pacman_power_mode)
             # Snap to grid
             self.x = round(self.x / TILE_SIZE) * TILE_SIZE
             self.y = round(self.y / TILE_SIZE) * TILE_SIZE
     
-    def choose_new_direction(self, walls, pacman_pos):
+    def choose_new_direction(self, walls, pacman_pos, pacman_power_mode):
         """Choose a new direction based on simple AI"""
         # Get current grid position
         grid_x = int(self.x // TILE_SIZE)
@@ -175,21 +196,20 @@ class Ghost:
             self.direction = (0, 0)
             return
         
-        # Simple AI: sometimes move towards Pacman, sometimes random
+        # Simple AI: behavior changes based on vulnerability
         pacman_grid_x, pacman_grid_y = pacman_pos
         distance_to_pacman = math.sqrt((grid_x - pacman_grid_x)**2 + (grid_y - pacman_grid_y)**2)
         
-        # 30% chance to move towards Pacman if close, otherwise random
-        if distance_to_pacman < 5 and random.random() < 0.3:
-            # Try to move towards Pacman
+        if self.vulnerable:
+            # When vulnerable, try to run away from Pacman
             best_direction = None
-            best_distance = float('inf')
+            best_distance = 0
             
             for dx, dy in valid_directions:
                 new_x = grid_x + dx
                 new_y = grid_y + dy
                 distance = math.sqrt((new_x - pacman_grid_x)**2 + (new_y - pacman_grid_y)**2)
-                if distance < best_distance:
+                if distance > best_distance:
                     best_distance = distance
                     best_direction = (dx, dy)
             
@@ -198,8 +218,27 @@ class Ghost:
             else:
                 self.direction = random.choice(valid_directions)
         else:
-            # Random movement
-            self.direction = random.choice(valid_directions)
+            # Normal behavior: sometimes move towards Pacman, sometimes random
+            if distance_to_pacman < 5 and random.random() < 0.3:
+                # Try to move towards Pacman
+                best_direction = None
+                best_distance = float('inf')
+                
+                for dx, dy in valid_directions:
+                    new_x = grid_x + dx
+                    new_y = grid_y + dy
+                    distance = math.sqrt((new_x - pacman_grid_x)**2 + (new_y - pacman_grid_y)**2)
+                    if distance < best_distance:
+                        best_distance = distance
+                        best_direction = (dx, dy)
+                
+                if best_direction:
+                    self.direction = best_direction
+                else:
+                    self.direction = random.choice(valid_directions)
+            else:
+                # Random movement
+                self.direction = random.choice(valid_directions)
     
     def check_wall_collision(self, x, y, walls):
         """Check if the ghost would collide with a wall at the given position"""
@@ -217,8 +256,20 @@ class Ghost:
         return (int(self.x // TILE_SIZE), int(self.y // TILE_SIZE))
     
     def draw(self, screen):
+        # Don't draw if eaten
+        if self.eaten:
+            return
+            
+        # Choose color based on vulnerability
+        if self.vulnerable:
+            # Flash between blue and white when vulnerable
+            flash_color = BLUE if int(pygame.time.get_ticks() / 200) % 2 == 0 else WHITE
+            ghost_color = flash_color
+        else:
+            ghost_color = self.original_color
+        
         # Draw ghost body (slightly different shape than Pacman)
-        pygame.draw.circle(screen, self.color, (int(self.x), int(self.y)), self.radius)
+        pygame.draw.circle(screen, ghost_color, (int(self.x), int(self.y)), self.radius)
         
         # Draw ghost bottom (wavy bottom)
         bottom_y = int(self.y) + self.radius
@@ -229,7 +280,7 @@ class Ghost:
             wave_points.append((int(self.x) + x_offset, int(wave_y)))
         
         if wave_points:
-            pygame.draw.polygon(screen, self.color, wave_points)
+            pygame.draw.polygon(screen, ghost_color, wave_points)
         
         # Draw eyes
         eye_offset = self.radius // 3
@@ -248,6 +299,7 @@ class Game:
     def __init__(self):
         self.walls = []
         self.pellets = []
+        self.power_pellets = []
         self.pacman = None
         self.ghosts = []
         self.total_pellets = 0
@@ -263,6 +315,7 @@ class Game:
         # Create a simple maze pattern
         self.walls = [[False for _ in range(MAP_WIDTH)] for _ in range(MAP_HEIGHT)]
         self.pellets = [[False for _ in range(MAP_WIDTH)] for _ in range(MAP_HEIGHT)]
+        self.power_pellets = [[False for _ in range(MAP_WIDTH)] for _ in range(MAP_HEIGHT)]
         
         # Create border walls
         for x in range(MAP_WIDTH):
@@ -295,6 +348,17 @@ class Game:
                 if not self.walls[y][x]:
                     self.pellets[y][x] = True
         
+        # Place power pellets in corners and strategic positions
+        power_pellet_positions = [
+            (1, 1), (MAP_WIDTH-2, 1), (1, MAP_HEIGHT-2), (MAP_WIDTH-2, MAP_HEIGHT-2),  # Corners
+            (MAP_WIDTH//2, 1), (MAP_WIDTH//2, MAP_HEIGHT-2), (1, MAP_HEIGHT//2), (MAP_WIDTH-2, MAP_HEIGHT//2)  # Middle edges
+        ]
+        
+        for x, y in power_pellet_positions:
+            if not self.walls[y][x]:
+                self.power_pellets[y][x] = True
+                self.pellets[y][x] = False  # Remove regular pellet if power pellet is placed
+        
         # Place Pacman in the center
         center_x = MAP_WIDTH // 2
         center_y = MAP_HEIGHT // 2
@@ -324,7 +388,7 @@ class Game:
             self.ghosts.append(ghost)
         
         # Count total pellets
-        self.total_pellets = sum(sum(row) for row in self.pellets)
+        self.total_pellets = sum(sum(row) for row in self.pellets) + sum(sum(row) for row in self.power_pellets)
         
         # Reset game state
         self.game_over = False
@@ -347,39 +411,53 @@ class Game:
             # Update ghosts
             pacman_grid_pos = self.pacman.get_grid_position()
             for ghost in self.ghosts:
-                ghost.update(dt, self.walls, pacman_grid_pos)
+                ghost.update(dt, self.walls, pacman_grid_pos, self.pacman.power_mode)
             
             # Check pellet collection
             grid_x, grid_y = self.pacman.get_grid_position()
-            if (0 <= grid_x < MAP_WIDTH and 0 <= grid_y < MAP_HEIGHT and 
-                self.pellets[grid_y][grid_x]):
-                self.pellets[grid_y][grid_x] = False
-                self.pacman.score += 10
+            if (0 <= grid_x < MAP_WIDTH and 0 <= grid_y < MAP_HEIGHT):
+                if self.pellets[grid_y][grid_x]:
+                    self.pellets[grid_y][grid_x] = False
+                    self.pacman.score += 10
+                elif self.power_pellets[grid_y][grid_x]:
+                    self.power_pellets[grid_y][grid_x] = False
+                    self.pacman.score += 50
+                    self.pacman.power_mode = True
+                    self.pacman.power_timer = 0  # Reset timer
             
             # Check ghost-Pacman collision
             for ghost in self.ghosts:
-                distance = math.sqrt((self.pacman.x - ghost.x)**2 + (self.pacman.y - ghost.y)**2)
-                if distance < (self.pacman.radius + ghost.radius):
-                    # Collision detected
-                    self.pacman.lives -= 1
-                    if self.pacman.lives <= 0:
-                        self.game_over = True
-                        self.life_lost_message = "GAME OVER!"
-                    else:
-                        # Show life lost message
-                        self.life_lost_message = f"LOST A LIFE! Lives remaining: {self.pacman.lives}"
-                        self.life_lost_timer = 0
-                        # Reset Pacman position to center
-                        center_x = MAP_WIDTH // 2
-                        center_y = MAP_HEIGHT // 2
-                        self.pacman.x = center_x * TILE_SIZE + TILE_SIZE // 2
-                        self.pacman.y = center_y * TILE_SIZE + TILE_SIZE // 2
-                        self.pacman.direction = (0, 0)
-                        self.pacman.next_direction = (0, 0)
-                    break  # Only handle one collision per frame
+                if not ghost.eaten:  # Only check collision with non-eaten ghosts
+                    distance = math.sqrt((self.pacman.x - ghost.x)**2 + (self.pacman.y - ghost.y)**2)
+                    if distance < (self.pacman.radius + ghost.radius):
+                        # Collision detected
+                        if self.pacman.power_mode and ghost.vulnerable:
+                            # Pacman eats the ghost
+                            ghost.eaten = True
+                            self.pacman.score += 200
+                            self.life_lost_message = f"GHOST EATEN! +200 points"
+                            self.life_lost_timer = 0
+                        else:
+                            # Pacman loses a life
+                            self.pacman.lives -= 1
+                            if self.pacman.lives <= 0:
+                                self.game_over = True
+                                self.life_lost_message = "GAME OVER!"
+                            else:
+                                # Show life lost message
+                                self.life_lost_message = f"LOST A LIFE! Lives remaining: {self.pacman.lives}"
+                                self.life_lost_timer = 0
+                                # Reset Pacman position to center
+                                center_x = MAP_WIDTH // 2
+                                center_y = MAP_HEIGHT // 2
+                                self.pacman.x = center_x * TILE_SIZE + TILE_SIZE // 2
+                                self.pacman.y = center_y * TILE_SIZE + TILE_SIZE // 2
+                                self.pacman.direction = (0, 0)
+                                self.pacman.next_direction = (0, 0)
+                        break  # Only handle one collision per frame
             
             # Check win condition
-            remaining_pellets = sum(sum(row) for row in self.pellets)
+            remaining_pellets = sum(sum(row) for row in self.pellets) + sum(sum(row) for row in self.power_pellets)
             if remaining_pellets == 0:
                 self.win = True
     
@@ -401,6 +479,10 @@ class Game:
                     center_x = x * TILE_SIZE + TILE_SIZE // 2
                     center_y = y * TILE_SIZE + TILE_SIZE // 2
                     pygame.draw.circle(screen, WHITE, (center_x, center_y), 3)
+                elif self.power_pellets[y][x]:
+                    center_x = x * TILE_SIZE + TILE_SIZE // 2
+                    center_y = y * TILE_SIZE + TILE_SIZE // 2
+                    pygame.draw.circle(screen, WHITE, (center_x, center_y), 8)  # Thicker power pellet
         
         # Draw Pacman
         if self.pacman:
@@ -418,12 +500,22 @@ class Game:
         lives_text = font.render(f"Lives: {self.pacman.lives}", True, WHITE)
         screen.blit(lives_text, (SCREEN_WIDTH - 120, 10))
         
-        # Debug info
-        debug_text = font.render(f"Dir: {self.pacman.direction} Next: {self.pacman.next_direction}", True, WHITE)
-        screen.blit(debug_text, (10, 50))
-        
-        pos_text = font.render(f"Pos: ({int(self.pacman.x)}, {int(self.pacman.y)})", True, WHITE)
-        screen.blit(pos_text, (10, 90))
+        # Power mode indicator
+        if self.pacman.power_mode:
+            power_text = font.render("POWER MODE!", True, YELLOW)
+            screen.blit(power_text, (10, 50))
+            
+            # Power timer bar
+            power_remaining = (self.pacman.power_duration - self.pacman.power_timer) / self.pacman.power_duration
+            bar_width = 200
+            bar_height = 10
+            bar_x = 10
+            bar_y = 80
+            
+            # Background bar
+            pygame.draw.rect(screen, WHITE, (bar_x, bar_y, bar_width, bar_height))
+            # Power bar
+            pygame.draw.rect(screen, YELLOW, (bar_x, bar_y, bar_width * power_remaining, bar_height))
         
         # Draw life lost message
         if self.life_lost_message:
