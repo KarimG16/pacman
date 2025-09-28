@@ -253,6 +253,9 @@ class Game:
         self.total_pellets = 0
         self.game_over = False
         self.win = False
+        self.life_lost_message = ""
+        self.life_lost_timer = 0
+        self.life_lost_duration = 2.0  # Show message for 2 seconds
         self.generate_map()
     
     def generate_map(self):
@@ -326,8 +329,17 @@ class Game:
         # Reset game state
         self.game_over = False
         self.win = False
+        self.life_lost_message = ""
+        self.life_lost_timer = 0
     
     def update(self, dt):
+        # Update life lost message timer
+        if self.life_lost_message:
+            self.life_lost_timer += dt
+            if self.life_lost_timer >= self.life_lost_duration:
+                self.life_lost_message = ""
+                self.life_lost_timer = 0
+        
         if not self.game_over and not self.win:
             # Update Pacman
             self.pacman.update(dt, self.walls)
@@ -352,7 +364,11 @@ class Game:
                     self.pacman.lives -= 1
                     if self.pacman.lives <= 0:
                         self.game_over = True
+                        self.life_lost_message = "GAME OVER!"
                     else:
+                        # Show life lost message
+                        self.life_lost_message = f"LOST A LIFE! Lives remaining: {self.pacman.lives}"
+                        self.life_lost_timer = 0
                         # Reset Pacman position to center
                         center_x = MAP_WIDTH // 2
                         center_y = MAP_HEIGHT // 2
@@ -409,10 +425,16 @@ class Game:
         pos_text = font.render(f"Pos: ({int(self.pacman.x)}, {int(self.pacman.y)})", True, WHITE)
         screen.blit(pos_text, (10, 90))
         
+        # Draw life lost message
+        if self.life_lost_message:
+            life_lost_text = font.render(self.life_lost_message, True, RED)
+            text_rect = life_lost_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2))
+            screen.blit(life_lost_text, text_rect)
+        
         # Draw game over/win messages
         if self.game_over:
             game_over_text = font.render("GAME OVER - Press R to restart", True, WHITE)
-            text_rect = game_over_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2))
+            text_rect = game_over_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 + 50))
             screen.blit(game_over_text, text_rect)
         elif self.win:
             win_text = font.render("YOU WIN! - Press R to restart", True, GREEN)
